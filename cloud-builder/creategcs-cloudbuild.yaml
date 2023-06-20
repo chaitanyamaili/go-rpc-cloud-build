@@ -1,0 +1,24 @@
+# In this directory, run the following command to build this builder.
+# $ gcloud builds submit . --config=cloudbuild.yaml --substitutions=_PROVISION_ENV="dev" --project=dev-decoupled
+substitutions:
+  _BASE_IMAGE: "gcr.io/cloud-builders/gsutil"
+  _GCS_REGION: "us-central1"
+  _GCS_NAME: "example.com"
+steps:
+  - name: ${_BASE_IMAGE}
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        echo "gsutil mb gs://${_GCS_NAME} -l ${_GCS_REGION}"
+        gsutil mb -l ${_GCS_REGION} gs://${_GCS_NAME}
+        errorCode=$?
+        if [ $errorCode -ne 0 ]; then
+          echo "failed"
+        else
+          echo "success"
+        fi
+
+timeout: 1200s
+queueTtl: 600s

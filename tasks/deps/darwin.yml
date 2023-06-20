@@ -1,0 +1,83 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
+version: 3
+
+tasks:
+  fetch:
+    summary: INTERNAL. Download fetch binary to fetch additional binaries
+    cmds:
+      - go install github.com/gruntwork-io/fetch@v{{ .FETCH_VERSION }}
+
+  fetch-from-github:
+    summary: INTERNAL. Download a binary from a GitHub release using fetch
+    deps:
+      - fetch
+    cmds:
+      - mkdir -p $HOME/.bin
+      - |
+          fetch --repo="https://github.com/{{ .FETCH_REMOTE_OWNER }}/{{ .FETCH_REMOTE_NAME }}" \
+                --tag="{{ .FETCH_REMOTE_VERSION }}" \
+                --release-asset="{{ .FETCH_REMOTE_ASSET }}" \
+                --release-asset-checksum="{{ .FETCH_REMOTE_EXPECTED_HASH }}" \
+                --release-asset-checksum-algo=sha256 \
+                --log-level=fatal ${HOME}/.bin
+      - mv ${HOME}/.bin/{{ .FETCH_REMOTE_ASSET }} ${HOME}/.bin/{{ .FETCH_REMOTE_NAME }}
+      - chmod +x ${HOME}/.bin/{{ .FETCH_REMOTE_NAME }}
+
+  go-deps:
+    summary: INTERNAL. Fetch needed dependencies for go development
+    cmds:
+      # It's okay to install the following as @latest. We're pinning
+      # golangci-lint version on the format step. This avoids downloading
+      # the whole golangci-lint repo tree
+      # See https://github.com/golangci/golangci-lint/issues/1657
+      - go install github.com/ysmood/golangci-lint@latest
+      - go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+      - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+      # Rest of tools can be pinned here
+      - go install github.com/99designs/gqlgen@{{ .GQLGEN_VERSION }}
+      - go install github.com/dmarkham/enumer@{{ .ENUMER_VERSION }}
+      - go install golang.org/x/tools/cmd/goimports@{{ .GOIMPORTS_VERSION }}
+
+  docker-deps:
+    summary: INTERNAL. Fetch dependencies for docker targets
+    cmds:
+      - task: fetch-from-github
+        vars:
+          FETCH_REMOTE_OWNER: hadolint
+          FETCH_REMOTE_NAME: hadolint
+          FETCH_REMOTE_VERSION: v{{ .HADOLINT_VERSION }}
+          FETCH_REMOTE_ASSET: hadolint-Darwin-x86_64
+          FETCH_REMOTE_EXPECTED_HASH: 7d41496bf591f2b9c7daa76d4aa1db04ea97b9e11b44a24a4e404a10aab33686
+    status:
+      - test -x ${HOME}/.bin/hadolint
+      - HADOLINT_CURRENT_VERSION=$(${HOME}/.bin/hadolint --version)
+      - test {{ .HADOLINT_CURRENT_VERSION }} = {{ .HADOLINT_TMP_VERSION }}
+    vars:
+      HADOLINT_EXPECTED_VERSION: Haskell Dockerfile Linter {{ .HADOLINT_VERSION }}-no-git
+
+  protoc-deps:
+    summary: INTERNAL. Fetch dependencies for protobuf compiler (protoc).
+    cmds:
+      - task: fetch-from-github
+        vars:
+          FETCH_REMOTE_OWNER: protocolbuffers
+          FETCH_REMOTE_NAME: "{{ .PROTOC_REMOTE_NAME }}"
+          FETCH_REMOTE_VERSION: v{{ .PROTOC_VERSION }}
+          FETCH_REMOTE_ASSET: protoc-{{ .PROTOC_VERSION }}-osx-x86_64.zip
+          FETCH_REMOTE_EXPECTED_HASH: d8b55cf1e887917dd43c447d77bd5bd213faff1e18ac3a176b35558d86f7ffff
+      - unzip -o -j ${HOME}/.bin/{{ .PROTOC_REMOTE_NAME }} "bin/{{ .PROTOC_BINARY_NAME }}" -d ${HOME}/.bin
+      - unzip -o ${HOME}/.bin/{{ .PROTOC_REMOTE_NAME }} "include/*" -d "{{ .PROTOBUF_INCLUDES }}/.."
+      - rm ${HOME}/.bin/{{ .PROTOC_REMOTE_NAME }}
+      - chmod +x ${HOME}/.bin/{{ .PROTOC_BINARY_NAME }}
+    status:
+      - test -x ${HOME}/.bin/protoc
+      - test -f {{ .PROTOBUF_INCLUDES }}/google/protobuf/empty.proto
+      - test -s {{ .PROTOBUF_INCLUDES }}/google/protobuf/empty.proto
+      - PROTOC_CURRENT_VERSION=$(${HOME}/.bin/protoc --version)
+      - test {{ .PROTOC_CURRENT_VERSION }} = {{ .PROTOC_TMP_VERSION }}
+    vars:
+      PROTOC_REMOTE_NAME: protobuf
+      PROTOC_BINARY_NAME: protoc
+      PROTOC_VERSION: 3.19.4
+      PROTOC_EXPECTED_VERSION: libprotoc {{ .PROTOC_VERSION }} -no-git

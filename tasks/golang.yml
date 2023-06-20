@@ -1,0 +1,111 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
+version: 3
+
+env:
+  GOOGLE_OAUTH_ACCESS_TOKEN: "{{ .GOOGLE_AUTH_TOKEN }}"
+
+tasks:
+  clean:
+    summary: INTERNAL. Clean artifacts and remove generated code
+    cmds:
+      - go clean
+      - find . -type d -name generated -exec rm -rf {} +
+      - find . -type f -name "*.pb.go" -exec rm -rf {} +
+
+  clean-stub:
+    summary: INTERNAL. Clean all go stub files.
+    cmds:
+      - find . -type f -name stub.go -exec rm {} +
+
+  build:server:
+    desc: Build go project {{.APP_NAME}}
+    dir: ./server/
+    cmds:
+      - task: generate
+      - task: lint
+      - CGO_ENABLED=0 go build -o {{.APP_NAME}} .
+
+  build:client:
+    desc: Build go project {{.APP_NAME}} client
+    dir: ./client/
+    cmds:
+      - task: generate
+      - task: lint
+      - CGO_ENABLED=0 go build -o client-{{.APP_NAME}} .
+
+  generate-stub:
+    summary: INTERNAL. Create stub files, needed for code generation.
+    cmds:
+      - mkdir -p internal/pb/types
+      - echo "package types" > internal/pb/types/stub.go
+
+  generate:
+    summary: INTERNAL. Run go code generators
+    vars:
+      SET_GEN_ENV: '
+        {{with .GENERATE_ENV -}}
+          {{range (splitList "$" $.GENERATE_ENV) -}}
+            {{printf "export %s\n" .}}
+          {{end}}
+        {{end}}
+        '
+    cmds:
+      - task: generate-stub
+      # Setting GOFLAGS as follows, to avoid a nasty bug on which dependency
+      # graph got broken on Go 1.16 release
+      # https://github.com/golang/go/issues/44129
+      # https://github.com/99designs/gqlgen/issues/1483
+      - |
+        {{.SET_GEN_ENV}}
+        GOFLAGS=-mod=mod go generate ./...
+      - task: clean-stub
+    sources:
+      - ./../ api/protobuf/*.proto
+    generates:
+      - internal/types/**/*.pb.go
+
+  lint:
+    summary: INTERNAL. Lint all go code
+    cmds:
+      - golangci-lint -v {{ .GOLANGCI_VERSION }} -- run -v --exclude-use-default
+
+  test:
+    desc: Run all tests unless a build tag is specified.
+    summary: |
+      Run all tests unless a build tag is specified.
+      By default this command run tests using the build flag
+      "-tag unit,integration". Otherwise it'll add the build
+      tags passed as arguments: "task test -- foo,bar" will result
+      in "go test -race ./... -tags foo,bar".
+    cmds:
+      - |
+        go test -race ./... {{.BUILD_TAGS}} -coverprofile coverage.out -coverpkg=./...
+        totalCoverage=`go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+'`
+        echo "Current test coverage : $totalCoverage%"
+        if (( $(echo "$totalCoverage {{.TESTCOVERAGE_THRESHOLD}}" | awk '{print ($1 >= $2)}') )); then
+          echo "OK"
+        else
+          echo "Current test coverage is below threshold. Please add more unit tests or adjust threshold to a lower value."
+          echo "Failed"
+          exit 1
+        fi
+    vars:
+      BUILD_TAGS:
+        sh: if [ -z {{.CLI_ARGS}} ]; then echo "-tags unit,integration"; else echo "-tags {{.CLI_ARGS}}"; fi
+
+  test:unit:
+    desc: Run unit tests.
+    cmds:
+      - task: test
+        vars:
+          CLI_ARGS: "unit"
+          TESTCOVERAGE_THRESHOLD: 5.3
+
+  test:integration:
+    desc: Run integration tests.
+    cmds:
+      - task: test
+        vars:
+          CLI_ARGS: "integration"
+          TESTCOVERAGE_THRESHOLD: 0

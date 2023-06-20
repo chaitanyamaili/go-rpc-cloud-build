@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package api.proto;
+
+import "types.proto";
+
+option go_package = "./v1";
+
+service Service {
+  rpc CreateNewGCS(CreateNewGCSRequest) returns (CreateNewGCSResponse);
+}

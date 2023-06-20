@@ -1,0 +1,28 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
+version: 3
+
+tasks:
+  login:
+    desc: "Authorize gcloud access (via browser) and set the account as active."
+    cmds:
+      - gcloud auth login
+
+  delete-image:
+    desc: "Removes a docker image from the artifact registry"
+    summary: |
+          Removes a docker image from the artifact registry
+
+          First check if the current docker image exists, filtered
+          by tags in the repository. Then marks the image for
+          deletion. This command is triggered by [task destroy].
+    ignore_error: true
+    silent: true
+    cmds:
+      - |
+        gcloud artifacts docker images list "{{.DOCKER_URL_NO_TAG}}" \
+        --include-tags --filter="tags:{{.DOCKER_TAG}}" \
+        --format='get(tags)' --verbosity=none \
+        | tr ', ' '\n' | grep {{.DOCKER_TAG}} | xargs -I '{}' \
+        gcloud artifacts docker images delete {{.DOCKER_URL_NO_TAG}}:{} \
+        --verbosity=error --quiet --delete-tags

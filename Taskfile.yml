@@ -1,0 +1,233 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
+version: 3
+
+includes:
+  docker: ./tasks/docker.yml
+  go: ./tasks/golang.yml
+  deps: ./tasks/deps/{{OS}}.yml
+  gcloud: ./tasks/gcloud.yml
+
+vars:
+  # Project dependencies
+  GO_MAJOR_VERSION: "1.20"
+  GO_VERSION: "{{ .GO_MAJOR_VERSION }}.1"
+  FETCH_VERSION: "0.4.2"
+  GQLGEN_VERSION: v0.13.0
+  GOIMPORTS_VERSION: v0.1.5
+  GOLANGCI_VERSION: "1.51.1"
+  HADOLINT_VERSION: "2.6.0"
+  ENUMER_VERSION: "v1.5.3"
+  PROTOBUF_INCLUDES: '{{ default "/usr/local/include" .PROTOBUF_INCLUDES }}'
+  PARENT_LOCATION: '{{ clean (expandenv "$PWD") }}'
+
+  # Microservice variables
+  APP_NAME: rpc-cloud-build
+  
+  # GCP variables
+  GOOGLE_AUTH_TOKEN:
+    sh: gcloud auth print-access-token --verbosity=error
+  GOOGLE_PROJECT: "{{ .RCB_SERVICE_PROJECTID }}"
+  GOOGLE_REGION: "{{ .RCB_SERVICE_REGION }}"
+
+  # Docker variables
+  DOCKER_PLATFORM: linux/amd64
+  DOCKER_REGISTRY_HOST: "{{.GOOGLE_REGION }}-docker.pkg.dev"
+  DOCKER_STORAGE: "artifact-registry"
+  DOCKER_URL: "{{.DOCKER_REGISTRY_HOST}}/{{ .GOOGLE_PROJECT }}"
+
+  # Docker variables server
+  DOCKER_TAG: "latest"
+  DOCKER_SERVER_NAME: "{{ .APP_NAME }}"
+  DOCKER_SERVER_URL_FULL: '{{ .DOCKER_URL }}/{{ .DOCKER_STORAGE }}/{{ .DOCKER_SERVER_NAME }}:{{ .DOCKER_TAG }}'
+  DOCKER_SERVER_URL_NO_TAG: '{{ .DOCKER_URL }}/{{ .DOCKER_STORAGE }}/{{ .DOCKER_SERVER_NAME }}'
+
+  # Docker variables client
+  DOCKER_CLIENT_NAME: "{{ .APP_NAME }}-client"
+  DOCKER_CLIENT_URL_FULL: '{{ .DOCKER_URL }}/{{ .DOCKER_STORAGE }}/{{ .DOCKER_CLIENT_NAME }}:{{ .DOCKER_TAG }}'
+  DOCKER_CLIENT_URL_NO_TAG: '{{ .DOCKER_URL }}/{{ .DOCKER_STORAGE }}/{{ .DOCKER_CLIENT_NAME }}'
+
+tasks:
+  init:
+    desc: Initialize the development environment
+    summary: |
+      Initialize the development environment
+      This command will copy a new .env file from its
+      .env.template, ask you to login to your google
+      account and login to our (soon to be created)
+      docker repository.
+    cmds:
+      - task: dev:env
+      - task: gcloud:login
+      - task: docker:login
+
+  build:server:
+    desc: Build the server docker image.
+    summary: |
+      Build a docker image for the provision service server.
+    cmds:
+      - task: build:server
+
+  update:server:
+    desc: Build and upload a new cloud run revision.
+    summary: |
+      Build and upload a new cloud run revision.
+      For this to work, you need to spin up the infrastructure
+      first. Running 'task tfm:apply'.
+      As we're using time-limited user-account tokens,
+      it needs to login to the docker repository first.
+      After that it'll build a docker image of this project,
+      push it to the repository and create a new revision
+      of a Cloud Run service using this new uplaoded image.
+    deps: [docker:login]
+    cmds:
+      - task: generate
+      - task: docker:build:server
+      - task: docker:push:server
+
+  deploy:server:
+    desc: Spin up the infrastructure in GCP, build and deploy a docker image.
+    summary: |
+      Spin up the infrastructure in GCP, build and deploy a docker image
+      This is a one shot-do-it-all command, prepares the
+      infrastructure in GCP, logs in to the custom docker repository,
+      builds a docker image, uploads it to the artifact registry and
+      creates a new revision of the cloud run service with the latest
+      uploaded image.
+    cmds:
+      - task: update:server
+
+  version:
+    desc: Print the deployable version string for service.
+    summary: |
+      Print the deployable version string for service.
+    cmds:
+      - task: version:service
+
+  push-artifact:server:
+    desc: Push the server docker image to the artifact registry.
+    summary: |
+      Build and upload a server docker image for this project.
+
+      It'll build a docker image of this project,
+      push it to the artifact repository.
+    cmds:
+      - task: docker:build:server
+        vars:
+          # Due to variable interdependency (use of SERVICE_DIR),
+          # we need to use the command to print the version.
+          DOCKER_TAG:
+            sh: ../../bin/get_artifact_version.sh
+      - task: docker:push:server
+        vars:
+          # Due to variable interdependency (use of SERVICE_DIR),
+          # we need to use the command to print the version.
+          DOCKER_TAG:
+            sh: ../../bin/get_artifact_version.sh
+
+  push-artifact:client:
+    desc: Push the client docker image to the artifact registry.
+    summary: |
+      Build and upload a client docker image for this project.
+
+      It'll build a docker image of this project,
+      push it to the artifact repository.
+    cmds:
+      - task: docker:build:client
+        vars:
+          # Due to variable interdependency (use of SERVICE_DIR),
+          # we need to use the command to print the version.
+          DOCKER_TAG:
+            sh: ../../bin/get_artifact_version.sh
+      - task: docker:push:client
+        vars:
+          # Due to variable interdependency (use of SERVICE_DIR),
+          # we need to use the command to print the version.
+          DOCKER_TAG:
+            sh: ../../bin/get_artifact_version.sh
+
+  build:client:
+    desc: Build the client docker image.
+    summary: |
+      Build a docker image for the provision service client.
+    cmds:
+      - task: build:client
+
+  update:client:
+    desc: Build and upload a new cloud run revision.
+    summary: |
+      Build and upload a new cloud run revision.
+      For this to work, you need to spin up the infrastructure
+      first. Running 'task tfm:apply'.
+      As we're using time-limited user-account tokens,
+      it needs to login to the docker repository first.
+      After that it'll build a docker image of this project,
+      push it to the repository and create a new revision
+      of a Cloud Run service using this new uplaoded image.
+    deps: [docker:login]
+    cmds:
+      - task: generate
+      - task: docker:build:client
+      - task: docker:push:client
+
+  deploy:client:
+    desc: Spin up the infrastructure in GCP, build and deploy a docker image.
+    summary: |
+      Spin up the infrastructure in GCP, build and deploy a docker image
+      This is a one shot-do-it-all command, prepares the
+      infrastructure in GCP, logs in to the custom docker repository,
+      builds a docker image, uploads it to the artifact registry and
+      creates a new revision of the cloud run service with the latest
+      uploaded image.
+    cmds:
+      - task: update:client
+
+  destroy:
+    desc: Destroy the Docker image created
+    cmds:
+      - task: gcloud:delete-image
+
+  prefetch-deps:
+    desc: Fetch needed dependencies for project development
+    cmds:
+      - task: deps:protoc-deps
+      - task: deps:go-deps
+      - task: deps:docker-deps
+
+  generate:
+    desc: Run generators
+    deps:
+      - deps:protoc-deps
+      - deps:go-deps
+    cmds:
+      - task: go:generate
+        vars:
+          GENERATE_ENV: 'PARENT_LOCATION="{{ .PARENT_LOCATION }}"$PROTOBUF_INCLUDES="{{ .PROTOBUF_INCLUDES }}"'
+
+  clean:
+    desc: Run project cleanup
+    summary: |
+      Run project cleanup
+      Remove any artifact generated by the go build process,
+      also search for generated code and deletes it.
+    cmds:
+      - task: go:clean
+      - task: docker:clean
+
+  format:
+    desc: Lints all our code
+    cmds:
+      - task: docker:lint
+      - task: go:lint
+
+  message:
+    desc: Sends a message to alert when a job status has changed.
+    summary: |
+      Sends a message to alert when a job status has changed.
+      Include the status of the job as STATUS. If a template file in then
+      assets/msg_templates folder exists (i.e. failed.tpl), then it will be
+      parsed and sent. If the file doesn't exist, no message will be sent.
+    cmds:
+      - task: message:notify
+        vars:
+          STATUS: "{{.CLI_ARGS}}"

@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package api.proto;
+
+option go_package = "./v1";
+
+message CreateNewGCSRequest {
+  string region = 1;
+}
+  
+message CreateNewGCSResponse {
+  string buildId = 1;
+  string status = 2;
+  string name = 3;
+}
+  

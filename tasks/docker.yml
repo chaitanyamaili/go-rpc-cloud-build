@@ -1,0 +1,113 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
+version: 3
+
+tasks:
+  login:
+    desc: Login to the artifact registry ({{ .DOCKER_URL }}) in GCP.
+    summary: |
+      Login to the artifact registry ({{ .DOCKER_URL }}) in GCP.
+
+      Logs in to our docker repository using a token provided by the GOOGLE_AUTH_TOKEN variable,
+      then it's passed from stdin to the docker
+      cli.
+    silent: true
+    cmds:
+      - echo "{{ .GOOGLE_AUTH_TOKEN }}" | docker login -u oauth2accesstoken --password-stdin https://{{ .DOCKER_URL }}
+
+  lint:server:
+    summary: INTERNAL. Lint project Dockerfile using hadolint
+    cmds:
+      - ${HOME}/.bin/hadolint ./server/Dockerfile
+
+  lint:client:
+    summary: INTERNAL. Lint project Dockerfile using hadolint
+    cmds:
+      - ${HOME}/.bin/hadolint ./client/Dockerfile
+
+  lint:
+    summary: INTERNAL. Lint project Dockerfile using hadolint
+    cmds:
+      - task: lint:server
+      - task: lint:client
+
+  clean:
+    desc: Remove dangling docker images.
+    summary: |
+      Remove dangling docker images. It won't ask for
+      user confirmation. You can also pass arguments like:
+        [task docker:clean -- --filter=label=something]
+      The [--] is required to change the behaviour of this command.
+    cmds:
+      - docker image prune -f {{ .CLI_ARGS }}
+
+  build:
+    desc: Build a docker image
+    vars:
+      DOCKERFILE_FOLDER: '{{ default "." .DOCKERFILE_FOLDER }}'
+      BUILD_DIR: '{{ default .DOCKERFILE_FOLDER .BUILD_DIR }}'
+      BASIC_TAG: '{{- with .BASIC_TAG -}}
+          -t "{{.}}"
+        {{- end -}}'
+      FULL_URL_TAG: '{{- with .FULL_URL_TAG -}}
+          -t "{{.}}"
+        {{- end -}}'
+    dir: "{{ .BUILD_DIR }}"
+    preconditions:
+      - test ! -z "{{ .BUILD_DIR }}"
+      - test -d "{{ .BUILD_DIR }}"
+    cmds:
+      - |
+        docker build --platform={{ .DOCKER_PLATFORM }} -f {{ .DOCKERFILE_FOLDER }}/Dockerfile --build-arg GITID={{ .GIT_HASH }} \
+        --build-arg GOVER={{ .GO_VERSION }} \
+        {{- with .BASIC_TAG }}
+        {{.}} \{{end}}
+        {{- with .FULL_URL_TAG }}
+        {{.}} \{{end}}
+        .
+
+  build:server:
+    desc: Push server latest image to the artifact registry.
+    deps:
+      - task: login
+      - task: build
+        vars:
+          DOCKERFILE_FOLDER: ./server
+          BUILD_DIR: "."
+          BASIC_TAG: '{{ .DOCKER_SERVER_URL_NO_TAG }}'
+          FULL_URL_TAG: '{{ .DOCKER_SERVER_URL_NO_TAG }}:{{ .DOCKER_TAG }}'
+
+  build:client:
+    desc: Push client latest image to the artifact registry.
+    deps:
+      - task: login
+      - task: build
+        vars:
+          DOCKERFILE_FOLDER: ./client
+          BUILD_DIR: "."
+          BASIC_TAG: '{{ .DOCKER_CLIENT_URL_NO_TAG }}'
+          FULL_URL_TAG: '{{ .DOCKER_CLIENT_URL_NO_TAG }}:{{ .DOCKER_TAG }}'
+
+  push:server:
+    desc: Push server latest image to the artifact registry.
+    deps: 
+      - task: login
+        vars:
+          DOCKERFILE_FOLDER: ./server
+          BUILD_DIR: "."
+          BASIC_TAG: '{{ .DOCKER_SERVER_URL_NO_TAG }}'
+          FULL_URL_TAG: '{{ .  }}:{{ .DOCKER_TAG }}'
+    cmds:
+      - docker push {{ .DOCKER_SERVER_URL_NO_TAG }}:{{ .DOCKER_TAG }}
+
+  push:client:
+    desc: Push client latest image to the artifact registry.
+    deps:
+      - task: login
+        vars:
+          DOCKERFILE_FOLDER: ./client
+          BUILD_DIR: "."
+          BASIC_TAG: '{{ .DOCKER_CLIENT_URL_NO_TAG }}'
+          FULL_URL_TAG: ' {{ .DOCKER_CLIENT_URL_NO_TAG }}:{{ .DOCKER_TAG }}'
+    cmds:
+      - docker push {{ .DOCKER_CLIENT_URL_NO_TAG }}:{{ .DOCKER_TAG }}

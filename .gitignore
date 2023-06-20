@@ -16,6 +16,19 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
-
+.golangci.yml
 # Go workspace file
 go.work
+
+# Auto generated files
+*.pb.go
+.task
+.env
+
+# Terrafoem generated files.
+.terraform
+terraform.tfvars
+.terraform.lock.hcl
+# vscose config.
+.vscode
+test
